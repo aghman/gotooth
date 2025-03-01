@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"time"
 
+	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
+	"github.com/influxdata/influxdb-client-go/v2/api"
 	"github.com/redis/go-redis/v9"
 	"tinygo.org/x/bluetooth"
-	"github.com/influxdata/influxdb-client-go/v2"
 )
 
 var adapter = bluetooth.DefaultAdapter
@@ -16,10 +18,13 @@ var knownDevices map[string]string
 var ch chan bluetooth.ScanResult
 
 var rDB *redis.Client
-var influxDB 
+var influxDB influxdb2.Client
+var radioAPI api.WriteAPIBlocking
 var ctx context.Context
+var hostname string
+var err error
 
-var influxToken := "loJwIREFDqGQcO6ummRk5lRkdbHA1oulukQCeT0oM1wF53AeI50JCYV10LTXgD4mlzIymoFAaASYNJM0Mkl6GA=="
+var influxToken = "loJwIREFDqGQcO6ummRk5lRkdbHA1oulukQCeT0oM1wF53AeI50JCYV10LTXgD4mlzIymoFAaASYNJM0Mkl6GA=="
 
 func main() {
 	ctx = context.Background()
@@ -27,12 +32,14 @@ func main() {
 	initBluetooth()
 
 	knownDevices = make(map[string]string)
+	hostname, err = os.Hostname()
+
 	ch = make(chan bluetooth.ScanResult, 1)
 	for {
 
 		// Start scanning.
 		println("scanning...")
-		err := adapter.Scan(processScannedDevice)
+		err = adapter.Scan(processScannedDevice)
 		must("start scan", err)
 		var device bluetooth.Device
 		select {
@@ -40,7 +47,7 @@ func main() {
 			println("Storing device address and name")
 
 			deviceKey := fmt.Sprintf("gotooth:%s", result.Address.String())
-			err := rDB.Set(ctx, deviceKey, result.LocalName(), 0).Err()
+			err = rDB.Set(ctx, deviceKey, result.LocalName(), 0).Err()
 			if err != nil {
 				panic(err)
 			}
@@ -74,6 +81,7 @@ func initDatabases() {
 
 	// Create a new client using an InfluxDB server base URL and an authentication token
 	influxDB = influxdb2.NewClient("http://influx.local:8086", influxToken)
+	radioAPI = influxDB.WriteAPIBlocking("home", "radio")
 }
 
 func must(action string, err error) {
@@ -110,6 +118,13 @@ func processScannedDevice(adapter *bluetooth.Adapter, device bluetooth.ScanResul
 	} else {
 		exists = true
 	}
+
+	p := influxdb2.NewPoint("device",
+		map[string]string{"strength": "dBm", "address": device.Address.String(), "host": hostname},
+		map[string]interface{}{"last": device.RSSI},
+		time.Now())
+	// write point immediately
+	radioAPI.WritePoint(context.Background(), p)
 	if !exists {
 		println("found device:", device.Address.String(), device.RSSI, device.LocalName(), device.ManufacturerData())
 		adapter.StopScan()
