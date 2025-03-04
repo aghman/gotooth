@@ -14,7 +14,6 @@ import (
 )
 
 var adapter = bluetooth.DefaultAdapter
-var knownDevices map[string]string
 var ch chan bluetooth.ScanResult
 
 var rDB *redis.Client
@@ -24,14 +23,11 @@ var ctx context.Context
 var hostname string
 var err error
 
-var influxToken = "loJwIREFDqGQcO6ummRk5lRkdbHA1oulukQCeT0oM1wF53AeI50JCYV10LTXgD4mlzIymoFAaASYNJM0Mkl6GA=="
-
 func main() {
 	ctx = context.Background()
 	initDatabases()
 	initBluetooth()
 
-	knownDevices = make(map[string]string)
 	hostname, err = os.Hostname()
 
 	ch = make(chan bluetooth.ScanResult, 1)
@@ -74,14 +70,14 @@ func initBluetooth() {
 
 func initDatabases() {
 	rDB = redis.NewClient(&redis.Options{
-		Addr:     "redis.local:6379",
+		Addr:     redisAddr,
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
 
 	// Create a new client using an InfluxDB server base URL and an authentication token
-	influxDB = influxdb2.NewClient("http://influx.local:8086", influxToken)
-	radioAPI = influxDB.WriteAPIBlocking("home", "radio")
+	influxDB = influxdb2.NewClient(influxURL, influxToken)
+	radioAPI = influxDB.WriteAPIBlocking(influxOrg, influxBucket)
 }
 
 func must(action string, err error) {
@@ -90,21 +86,7 @@ func must(action string, err error) {
 	}
 }
 
-// DeviceAddress is the MAC address of the Bluetooth peripheral you want to connect to.
-// Replace this by using -ldflags="-X main.DeviceAddress=[MAC ADDRESS]"
-// where [MAC ADDRESS] is the actual MAC address of the peripheral.
-// For example:
-// tinygo flash -target circuitplay-bluefruit -ldflags="-X main.DeviceAddress=7B:36:98:8C:41:1C" ./examples/discover/
 var DeviceAddress string
-
-func connectAddress() string {
-	return DeviceAddress
-}
-
-// wait on baremetal, proceed immediately on desktop OS.
-func wait() {
-	time.Sleep(3 * time.Second)
-}
 
 func processScannedDevice(adapter *bluetooth.Adapter, device bluetooth.ScanResult) {
 	var exists bool
